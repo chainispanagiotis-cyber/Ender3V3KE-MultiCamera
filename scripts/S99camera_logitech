@@ -1,0 +1,53 @@
+#!/bin/sh
+
+camera_logitech_service() {
+    CAMDIR=/usr/data/camera-logitech
+    PIDFILE=/usr/data/camera-logitech/mjpg_streamer.pid
+
+    case "$1" in
+        start)
+            if [ -f "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; then
+                echo "Logitech camera is already running."
+                return 0
+            fi
+
+            echo "Starting Logitech C270 on port 8080..."
+            /opt/lib/ld.so.1 --library-path /opt/lib:/usr/lib \
+                "$CAMDIR/mjpg_streamer" \
+                -i "$CAMDIR/input_uvc.so -d /dev/v4l/by-path/platform-13500000.otg_new-usb-0:1.1.3:1.0-video-index0 -r 1280x720 -f 15" \
+                -o "$CAMDIR/output_http.so -p 8080" &
+
+            echo $! > "$PIDFILE"
+            ;;
+        stop|kill)
+            if [ -f "$PIDFILE" ]; then
+                PID=$(cat "$PIDFILE")
+                if kill -0 "$PID" 2>/dev/null; then
+                    kill "$PID"
+                fi
+                rm -f "$PIDFILE"
+                echo "Logitech camera stopped."
+            fi
+            ;;
+        check)
+            [ -f "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null
+            return $?
+            ;;
+        restart)
+            camera_logitech_service stop
+            camera_logitech_service start
+            return $?
+            ;;
+        reconfigure)
+            return 0
+            ;;
+        *)
+            echo "Usage: $0 {start|stop|restart|check|reconfigure|kill}" >&2
+            return 1
+            ;;
+    esac
+
+    return 0
+}
+
+camera_logitech_service "$1"

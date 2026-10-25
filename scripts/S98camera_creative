@@ -1,0 +1,75 @@
+#!/bin/sh
+
+creative_camera_service() {
+    CREATIVE_CAMDIR=/usr/data/camera-logitech
+    CREATIVE_PIDFILE=/usr/data/camera-logitech/mjpg_streamer_creative.pid
+    CREATIVE_LINK=/dev/v4l/by-path/platform-13500000.otg_new-usb-0:1.1.2:1.0-video-index0
+
+    find_creative_camera() {
+        for CREATIVE_FILE in /proc/[0-9]*/cmdline; do
+            [ -r "$CREATIVE_FILE" ] || continue
+            CREATIVE_CMD=$(tr '\000' ' ' < "$CREATIVE_FILE" 2>/dev/null)
+            case "$CREATIVE_CMD" in
+                *mjpg_streamer*"-p 8081"*)
+                    CREATIVE_FOUND=${CREATIVE_FILE#/proc/}
+                    CREATIVE_FOUND=${CREATIVE_FOUND%/cmdline}
+                    echo "$CREATIVE_FOUND"
+                    return 0
+                    ;;
+            esac
+        done
+        return 1
+    }
+
+    case "$1" in
+        start)
+            CREATIVE_PID=$(find_creative_camera)
+            if [ -n "$CREATIVE_PID" ]; then
+                echo "$CREATIVE_PID" > "$CREATIVE_PIDFILE"
+                echo "Creative camera is already running (PID $CREATIVE_PID)."
+                return 0
+            fi
+
+            CREATIVE_DEVICE=$(/usr/bin/readlink -f "$CREATIVE_LINK")
+            if [ ! -c "$CREATIVE_DEVICE" ]; then
+                echo "Creative camera device not found: $CREATIVE_LINK" >&2
+                return 1
+            fi
+
+            echo "Starting Creative camera on $CREATIVE_DEVICE, port 8081..."
+            /opt/lib/ld.so.1 --library-path /opt/lib:/usr/lib \
+                "$CREATIVE_CAMDIR/mjpg_streamer" \
+                -i "$CREATIVE_CAMDIR/input_uvc.so -d $CREATIVE_DEVICE -r 640x480 -f 15" \
+                -o "$CREATIVE_CAMDIR/output_http.so -p 8081" &
+
+            echo $! > "$CREATIVE_PIDFILE"
+            ;;
+        stop|kill)
+            CREATIVE_PID=$(find_creative_camera)
+            if [ -n "$CREATIVE_PID" ]; then
+                kill "$CREATIVE_PID"
+                echo "Creative camera stopped."
+            fi
+            rm -f "$CREATIVE_PIDFILE"
+            ;;
+        check)
+            find_creative_camera >/dev/null
+            return $?
+            ;;
+        restart)
+            creative_camera_service stop
+            creative_camera_service start
+            return $?
+            ;;
+        reconfigure)
+            return 0
+            ;;
+        *)
+            echo "Usage: $0 {start|stop|restart|check|reconfigure|kill}" >&2
+            return 1
+            ;;
+    esac
+    return 0
+}
+
+creative_camera_service "$1"

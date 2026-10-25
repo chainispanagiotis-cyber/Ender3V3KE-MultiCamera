@@ -1,0 +1,75 @@
+#!/bin/sh
+
+nebula_camera_service() {
+    NEBULA_CAMDIR=/usr/data/camera-logitech
+    NEBULA_PIDFILE=/usr/data/camera-logitech/mjpg_streamer_nebula.pid
+    NEBULA_LINK=/dev/v4l/by-path/platform-13500000.otg_new-usb-0:1.1.4:1.0-video-index0
+
+    find_nebula_camera() {
+        for NEBULA_FILE in /proc/[0-9]*/cmdline; do
+            [ -r "$NEBULA_FILE" ] || continue
+            NEBULA_CMD=$(tr '\000' ' ' < "$NEBULA_FILE" 2>/dev/null)
+            case "$NEBULA_CMD" in
+                *mjpg_streamer*"-p 8082"*)
+                    NEBULA_FOUND=${NEBULA_FILE#/proc/}
+                    NEBULA_FOUND=${NEBULA_FOUND%/cmdline}
+                    echo "$NEBULA_FOUND"
+                    return 0
+                    ;;
+            esac
+        done
+        return 1
+    }
+
+    case "$1" in
+        start)
+            NEBULA_PID=$(find_nebula_camera)
+            if [ -n "$NEBULA_PID" ]; then
+                echo "$NEBULA_PID" > "$NEBULA_PIDFILE"
+                echo "Nebula camera is already running (PID $NEBULA_PID)."
+                return 0
+            fi
+
+            NEBULA_DEVICE=$(/usr/bin/readlink -f "$NEBULA_LINK")
+            if [ ! -c "$NEBULA_DEVICE" ]; then
+                echo "Nebula camera device not found: $NEBULA_LINK" >&2
+                return 1
+            fi
+
+            echo "Starting Nebula camera on $NEBULA_DEVICE, port 8082..."
+            /opt/lib/ld.so.1 --library-path /opt/lib:/usr/lib \
+                "$NEBULA_CAMDIR/mjpg_streamer" \
+                -i "$NEBULA_CAMDIR/input_uvc.so -d $NEBULA_DEVICE -r 1280x720 -f 15" \
+                -o "$NEBULA_CAMDIR/output_http.so -p 8082" &
+
+            echo $! > "$NEBULA_PIDFILE"
+            ;;
+        stop|kill)
+            NEBULA_PID=$(find_nebula_camera)
+            if [ -n "$NEBULA_PID" ]; then
+                kill "$NEBULA_PID"
+                echo "Nebula camera stopped."
+            fi
+            rm -f "$NEBULA_PIDFILE"
+            ;;
+        check)
+            find_nebula_camera >/dev/null
+            return $?
+            ;;
+        restart)
+            nebula_camera_service stop
+            nebula_camera_service start
+            return $?
+            ;;
+        reconfigure)
+            return 0
+            ;;
+        *)
+            echo "Usage: $0 {start|stop|restart|check|reconfigure|kill}" >&2
+            return 1
+            ;;
+    esac
+    return 0
+}
+
+nebula_camera_service "$1"

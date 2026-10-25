@@ -1,0 +1,1 @@
+* * * * * /bin/sh /usr/data/camera-watchdog/watchdog.sh >> /usr/data/camera-watchdog/watchdog.log 2>&1
